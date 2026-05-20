@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Contract Copilot</title>
+    <script src="https://cdn.tailwindcss.com">
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        * { font-family: 'Inter', sans-serif; }
+
+        /* Custom gradient backgrounds */
+        .bg-gradient-navy { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); }
+        .bg-gradient-card { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); }
+        .bg-gradient-success { background: linear-gradient(135deg, #059669 0%, #10b981 100%); }
+        .bg-gradient-warning { background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%); }
+        .bg-gradient-danger { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); }
+
+        /* Risk score gauge */
+        .gauge-container { position: relative; width: 180px; height: 180px; }
+        .gauge-svg { transform: rotate(-90deg); }
+        .gauge-track { fill: none; stroke: #e2e8f0; stroke-width: 12; }
+        .gauge-fill { fill: none; stroke-width: 12; stroke-linecap: round; transition: stroke-dashoffset 1.5s ease, stroke 0.5s ease; }
+
+        /* Upload drag & drop */
+        .upload-zone {
+            border: 2px dashed #cbd5e1;
+            border-radius: 16px;
+            padding: 3rem 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: #f8fafc;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: #3b82f6;
+            background: #eff6ff;
+        }
+        .upload-zone.has-file {
+            border-color: #10b981;
+            background: #f0fdf4;
+        }
+
+        /* Animations */
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .animate-fade-in { animation: fadeIn 0.5s ease forwards; }
+        .animate-pulse-slow { animation: pulse 2s ease-in-out infinite; }
+        .animate-spin-slow { animation: spin 1s linear infinite; }
+
+        /* Result cards stagger */
+        .result-card { opacity: 0; }
+        .result-card.show { animation: fadeIn 0.5s ease forwards; }
+
+        /* Risk flag levels */
+        .risk-high { border-left: 4px solid #ef4444; }
+        .risk-medium { border-left: 4px solid #f59e0b; }
+        .risk-low { border-left: 4px solid #10b981; }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        /* Tab styling */
+        .tab-active { color: #1e3a5f; border-bottom: 3px solid #1e3a5f; font-weight: 600; }
+        .tab-inactive { color: #94a3b8; border-bottom: 3px solid transparent; cursor: pointer; }
+        .tab-inactive:hover { color: #64748b; }
+
+        /* Loading dots */
+        .loading-dots::after { content: ''; animation: dots 1.5s steps(4, end) infinite; }
+        @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } 100% { content: ''; } }
+
+        /* Responsive fixes */
+        @media (max-width: 768px) {
+            .gauge-container { width: 140px; height: 140px; }
+        }
+        
+        /* Language toggle */
+        .lang-btn { color: #94a3b8; transition: all 0.2s; cursor: pointer; }
+        .lang-btn:hover { color: #e2e8f0; }
+        .lang-active { background: #3b82f6; color: white !important; }
+        .lang-active:hover { background: #2563eb; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+    <!-- ===== HEADER ===== -->
+    <header class="bg-gradient-navy text-white shadow-lg">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-lg font-bold">⚖️</div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight">AI Contract Copilot</h1>
+                    <p class="text-xs text-slate-400">Powered by DeepSeek AI</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+                <div class="flex items-center bg-slate-700 rounded-lg p-0.5">
+                    <button onclick="setLanguage('en')" id="lang-en" class="px-3 py-1.5 rounded-md text-xs font-medium transition-all lang-btn lang-active">EN</button>
+                    <button onclick="setLanguage('id')" id="lang-id" class="px-3 py-1.5 rounded-md text-xs font-medium transition-all lang-btn">ID</button>
+                </div>
+                <span id="statusIndicator" class="flex items-center gap-1.5 text-slate-300">
+                    <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse-slow"></span>
+                    <span data-i18n="systemReady">System Ready</span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- ===== MAIN CONTENT ===== -->
+    <main class="max-w-6xl mx-auto px-4 py-8">
+
+        <!-- Tab Navigation -->
+        <div class="flex gap-6 border-b border-slate-200 mb-8">
+            <button onclick="switchTab('analyze')" id="tab-analyze" class="tab-active pb-3 px-1 text-sm transition-all">📄 Upload & Analyze</button>
+            <button onclick="switchTab('generate')" id="tab-generate" class="tab-inactive pb-3 px-1 text-sm transition-all">✍️ Generate Draft</button>
+            <button onclick="switchTab('history')" id="tab-history" class="tab-inactive pb-3 px-1 text-sm transition-all">📋 History</button>
+        </div>
+
+        <!-- ===== TAB: ANALYZE ===== -->
+        <div id="panel-analyze" class="tab-panel">
+
+            <!-- Upload Section -->
+            <div id="uploadSection" class="mb-8">
+                <div class="upload-zone" id="uploadZone">
+                    <div class="flex flex-col items-center gap-3">
+                        <div class="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center">
+                            <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="text-lg font-medium text-slate-700">Upload contract to analyze</p>
+                            <p class="text-sm text-slate-500 mt-1">PDF or DOCX • Max 50MB • Drop files here</p>
+                        </div>
+                        <button onclick="document.getElementById('fileInput').click()" class="mt-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm">
+                            Select File
+                        </button>
+                        <input type="file" id="fileInput" accept=".pdf,.docx,.doc" class="hidden" onchange="handleFileSelect(this)">
+                    </div>
+                </div>
+
+                <!-- Selected File Info -->
+                <div id="fileInfo" class="hidden mt-4 p-4 bg-blue-50 rounded-xl border border-blue-100 animate-fade-in">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="text-2xl">📄</span>
+                            <div>
+                                <p id="fileName" class="font-medium text-slate-800"></p>
+                                <p id="fileSize" class="text-sm text-slate-500"></p>
+                            </div>
+                        </div>
+                        <button onclick="analyzeFile()" id="analyzeBtn" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                            Analyze
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Loading Section -->
+            <div id="loadingSection" class="hidden">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center">
+                    <div class="flex flex-col items-center gap-4">
+                        <div class="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center">
+                            <svg class="w-8 h-8 text-blue-500 animate-spin-slow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-lg font-semibold text-slate-800"><span data-i18n="analyzing">Analyzing contract...</span></h3>
+                        <p class="text-sm text-slate-500"><span data-i18n="analyzingSub">AI is reading and analyzing the document</span></p>
+                        <div class="w-64 h-2 bg-slate-100 rounded-full overflow-hidden mt-2">
+                            <div class="h-full bg-blue-500 rounded-full animate-pulse-slow" style="width: 60%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" class="hidden">
+
+                <!-- Top Stats Bar -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 animate-fade-in result-card" style="animation-delay: 0.1s">
+                        <div class="flex items-center gap-2 text-slate-500 text-xs uppercase tracking-wide mb-2">Risk Score</div>
+                        <div class="flex items-center gap-3">
+                            <span id="riskScoreBadge" class="text-3xl font-bold">--</span>
+                            <span id="riskLevelBadge" class="px-2.5 py-1 rounded-full text-xs font-medium"></span>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 animate-fade-in result-card" style="animation-delay: 0.2s">
+                        <div class="flex items-center gap-2 text-slate-500 text-xs uppercase tracking-wide mb-2">Document Type</div>
+                        <p id="docTypeValue" class="text-lg font-semibold text-slate-800">--</p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 animate-fade-in result-card" style="animation-delay: 0.3s">
+                        <div class="flex items-center gap-2 text-slate-500 text-xs uppercase tracking-wide mb-2">Processing Time</div>
+                        <p id="processingTime" class="text-lg font-semibold text-slate-800">--</p>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 animate-fade-in result-card" style="animation-delay: 0.4s">
+                        <div class="flex items-center gap-2 text-slate-500 text-xs uppercase tracking-wide mb-2">Tokens Used</div>
+                        <p id="tokenCount" class="text-lg font-semibold text-slate-800">--</p>
+                    </div>
+                </div>
+
+                <!-- Main Content Grid -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                    <!-- Left: Summary & Parties -->
+                    <div class="lg:col-span-2 space-y-6">
+
+                        <!-- Summary -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fade-in result-card" style="animation-delay: 0.5s">
+                            <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">📝 Summary</h3>
+                            <p id="summaryText" class="text-slate-700 leading-relaxed"></p>
+                        </div>
+
+                        <!-- Parties -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fade-in result-card" style="animation-delay: 0.6s">
+                            <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">👥 Parties</h3>
+                            <div id="partiesList" class="space-y-2"></div>
+                        </div>
+
+                        <!-- Risk Flags -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fade-in result-card" style="animation-delay: 0.7s">
+                            <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">🚩 Risk Flags</h3>
+                            <div id="riskFlagsList" class="space-y-3"></div>
+                            <div id="noFlags" class="hidden text-slate-400 text-sm italic">No risk flags detected.</div>
+                        </div>
+
+                        <!-- Recommendations -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fade-in result-card" style="animation-delay: 0.9s">
+                            <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">💡 Recommendations</h3>
+                            <ul id="recommendationsList" class="space-y-2"></ul>
+                        </div>
+                    </div>
+
+                    <!-- Right Sidebar -->
+                    <div class="space-y-6">
+
+                        <!-- Missing Clauses -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fade-in result-card" style="animation-delay: 0.8s">
+                            <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">⚠️ Missing Clauses</h3>
+                            <div id="missingClausesList" class="space-y-2"></div>
+                            <div id="noMissing" class="hidden text-slate-400 text-sm italic">All standard clauses are present.</div>
+                        </div>
+
+                        <!-- Strengths -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fade-in result-card" style="animation-delay: 1s">
+                            <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">✅ Strengths</h3>
+                            <ul id="strengthsList" class="space-y-2"></ul>
+                            <div id="noStrengths" class="hidden text-slate-400 text-sm italic">Tidak ada kekuatan khusus yang terdeteksi.</div>
+                        </div>
+
+                        <!-- Legal Info -->
+                        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-fade-in result-card" style="animation-delay: 1.1s">
+                            <h3 class="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-3">⚖️ Legal Info</h3>
+                            <div class="space-y-3 text-sm">
+                                <div>
+                                    <span class="text-slate-500">Governing Law:</span>
+                                    <p id="governingLaw" class="font-medium text-slate-700 mt-0.5">--</p>
+                                </div>
+                                <div>
+                                    <span class="text-slate-500">Dispute Resolution:</span>
+                                    <p id="disputeResolution" class="font-medium text-slate-700 mt-0.5">--</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="animate-fade-in result-card" style="animation-delay: 1.2s">
+                            <button onclick="downloadReport()" class="w-full px-4 py-3 bg-slate-800 text-white rounded-xl hover:bg-slate-700 transition-colors text-sm font-medium shadow-sm">
+                                📥 Download Risk Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Disclaimer -->
+                <div class="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700 animate-fade-in" data-i18n="disclaimer">
+                    ⚠️ This analysis is AI-assisted and does not replace professional legal opinion. All documents must be reviewed by a licensed attorney before use.
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: GENERATE ===== -->
+        <div id="panel-generate" class="hidden tab-panel">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
+                <h2 class="text-xl font-bold text-slate-800 mb-2">Generate Legal Draft</h2>
+                <p class="text-sm text-slate-500 mb-6">Create a legal document draft by filling in the details below.</p>
+
+                <form id="generateForm" onsubmit="generateDraft(event)" class="space-y-5">
+                    <!-- Document Type -->
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Document Type</label>
+                        <select id="docType" required class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-sm bg-white">
+                            <option value="">Select document type...</option>
+                            <option value="NDA">Non-Disclosure Agreement (NDA)</option>
+                            <option value="MoU">Memorandum of Understanding (MoU)</option>
+                            <option value="MoA">Memorandum of Agreement (MoA)</option>
+                            <option value="Perjanjian Kerjasama">Cooperation Agreement</option>
+                            <option value="SPA">Share Purchase Agreement (SPA)</option>
+                            <option value="Employment Agreement">Employment Agreement</option>
+                        </select>
+                    </div>
+
+                    <!-- Party 1 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">First Party Name</label>
+                            <input type="text" id="party1Name" required placeholder="e.g. PT Ahmad Perkasa" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Role</label>
+                            <input type="text" id="party1Role" value="First Party" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-sm">
+                        </div>
+                    </div>
+
+                    <!-- Party 2 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Second Party Name</label>
+                            <input type="text" id="party2Name" required placeholder="e.g. PT Jaya Wijaya" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-2">Role</label>
+                            <input type="text" id="party2Role" value="Second Party" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-sm">
+                        </div>
+                    </div>
+
+                    <!-- Context -->
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Additional Context (optional)</label>
+                        <textarea id="context" rows="3" placeholder="e.g. Technology distribution partnership, 2-year term, West Java region" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all text-sm resize-none"></textarea>
+                    </div>
+
+                    <button type="submit" class="w-full px-6 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors text-sm font-medium shadow-sm">
+                        ✍️ Generate Draft
+                    </button>
+                </form>
+
+                <!-- Draft Result -->
+                <div id="draftResult" class="hidden mt-8">
+                    <hr class="mb-6 border-slate-200">
+                    <h3 class="text-lg font-semibold text-slate-800 mb-4">📄 Generated Draft</h3>
+                    <div id="draftContent" class="p-4 bg-slate-50 rounded-xl border border-slate-200 text-sm leading-relaxed whitespace-pre-wrap font-mono max-h-96 overflow-y-auto"></div>
+                    <div class="flex gap-3 mt-4">
+                        <button onclick="copyDraft()" class="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors text-sm font-medium">📋 Copy</button>
+                        <button onclick="downloadDraft()" class="px-4 py-2.5 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors text-sm font-medium">📥 Download .txt</button>
+                    </div>
+                </div>
+
+                <!-- Loading -->
+                <div id="draftLoading" class="hidden mt-6 text-center text-slate-500 text-sm">
+                    <div class="flex items-center justify-center gap-2">
+                        <svg class="w-5 h-5 text-blue-500 animate-spin-slow" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        <span>Mengenerate draft...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: HISTORY ===== -->
+        <div id="panel-history" class="hidden tab-panel">
+            <div id="historyContent">
+                <div class="text-center py-12 text-slate-400">
+                    <p class="text-lg">Loading history...</p>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ===== FOOTER ===== -->
+    <footer class="border-t border-slate-200 mt-12 py-6 text-center text-xs text-slate-400">
+        <span data-i18n="footer">AI Contract Copilot v0.1 — Built for Demo Purposes</span>
+    </footer>
+
+    <!-- ===== I18N TRANSLATIONS ===== -->
+    <script>
+    const i18n = {
+        en: {
+            systemReady: "System Ready",
+            analyze: "Analyze",
+            processing: "Processing...",
+            analyzing: "Analyzing contract...",
+            analyzingSub: "AI is reading and analyzing the document",
+            disclaimer: "⚠️ This analysis is AI-assisted and does not replace professional legal opinion. All documents must be reviewed by a licensed attorney before use.",
+            copySuccess: "Draft copied to clipboard!",
+            historyEmpty: "No history yet.",
+            historyEmptySub: "Upload a contract to get started.",
+            footer: "AI Contract Copilot v0.1 — Built for Demo Purposes",
+        },
+        id: {
+            systemReady: "Sistem Siap",
+            analyze: "Analyze",
+            processing: "Memproses...",
+            analyzing: "Menganalisa kontrak...",
+            analyzingSub: "AI sedang membaca dan menganalisa dokumen",
+            disclaimer: "⚠️ Analisa ini adalah bantuan AI dan tidak menggantikan opini hukum profesional. Semua dokumen harus direview oleh lawyer berlisensi sebelum digunakan.",
+            copySuccess: "Draft berhasil di-copy!",
+            historyEmpty: "Belum ada riwayat.",
+            historyEmptySub: "Upload kontrak untuk memulai.",
+            footer: "AI Contract Copilot v0.1 — Dibuat untuk Demo",
+        }
+    };
+    let currentLang = localStorage.getItem('lang') || 'en';
+    function applyLanguage() {
+        const lang = i18n[currentLang];
+        document.documentElement.lang = currentLang;
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+            const key = el.dataset.i18n;
+            if (lang[key]) el.textContent = lang[key];
+        });
+        document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('lang-active'));
+        document.getElementById('lang-' + currentLang).classList.add('lang-active');
+        localStorage.setItem('lang', currentLang);
+    }
+    function setLanguage(lang) {
+        currentLang = lang;
+        applyLanguage();
+    }
+    </script>
+
+    <!-- ===== DATA STORE ===== -->
+    <script>
+        // Store raw data for report export
+        let lastAnalysisData = null;
+
+        // ===== TAB SWITCHING =====
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+            document.querySelectorAll('[id^="tab-"]').forEach(t => {
+                t.classList.remove('tab-active');
+                t.classList.add('tab-inactive');
+            });
+
+            document.getElementById('panel-' + tab).classList.remove('hidden');
+            document.getElementById('tab-' + tab).classList.remove('tab-inactive');
+            document.getElementById('tab-' + tab).classList.add('tab-active');
+
+            if (tab === 'history') loadHistory();
+        }
+
+        // ===== FILE UPLOAD HANDLING =====
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+
+        ['dragenter', 'dragover'].forEach(e => {
+            uploadZone.addEventListener(e, (ev) => {
+                ev.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(e => {
+            uploadZone.addEventListener(e, (ev) => {
+                ev.preventDefault();
+                uploadZone.classList.remove('dragover');
+            });
+        });
+        uploadZone.addEventListener('drop', (ev) => {
+            const files = ev.dataTransfer.files;
+            if (files.length > 0) handleFile(files[0]);
+        });
+
+        function handleFileSelect(input) {
+            if (input.files.length > 0) handleFile(input.files[0]);
+        }
+
+        function handleFile(file) {
+            const validTypes = ['.pdf', '.docx', '.doc'];
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+
+            if (!validTypes.includes(ext)) {
+                alert('Only PDF and DOCX files are supported.');
+                return;
+            }
+
+            if (file.size > 50 * 1024 * 1024) {
+                alert('File too large. Maximum 50MB.');
+                return;
+            }
+
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileSize').textContent = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+            document.getElementById('fileInfo').classList.remove('hidden');
+            document.getElementById('fileInfo').classList.add('animate-fade-in');
+            uploadZone.classList.add('has-file');
+
+            // Store file reference
+            window.selectedFile = file;
+        }
+
+        // ===== ANALYZE FILE =====
+        async function analyzeFile() {
+            if (!window.selectedFile) return;
+
+            const btn = document.getElementById('analyzeBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="animate-spin-slow">⟳</span> Processing...';
+
+            document.getElementById('uploadSection').classList.add('hidden');
+            document.getElementById('loadingSection').classList.remove('hidden');
+            document.getElementById('resultsSection').classList.add('hidden');
+
+            const formData = new FormData();
+            formData.append('file', window.selectedFile);
+            formData.append('language', currentLang);
+
+            try {
+                const res = await fetch('/analyze', { method: 'POST', body: formData });
+                const result = await res.json();
+
+                document.getElementById('loadingSection').classList.add('hidden');
+
+                if (result.success) {
+                    lastAnalysisData = result;
+                    displayResults(result);
+                } else {
+                    alert('Error: ' + (result.error || result.detail || 'Unknown error'));
+                    document.getElementById('uploadSection').classList.remove('hidden');
+                }
+            } catch (err) {
+                document.getElementById('loadingSection').classList.add('hidden');
+                alert('Failed to connect to server. Make sure the server is running.');
+                document.getElementById('uploadSection').classList.remove('hidden');
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg> Analyze';
+        }
+
+        // ===== DISPLAY RESULTS =====
+        function displayResults(result) {
+            const d = result.data;
+            if (!d) return;
+
+            // Stats bar
+            const score = d.risk_score || 0;
+            document.getElementById('riskScoreBadge').textContent = score;
+            document.getElementById('riskLevelBadge').textContent = (d.risk_level || 'unknown').toUpperCase();
+
+            const level = (d.risk_level || 'medium').toLowerCase();
+            const badge = document.getElementById('riskLevelBadge');
+            if (level === 'low') { badge.className = 'px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700'; }
+            else if (level === 'medium') { badge.className = 'px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700'; }
+            else { badge.className = 'px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700'; }
+
+            document.getElementById('docTypeValue').textContent = d.doc_type || 'Unknown';
+            document.getElementById('processingTime').textContent = (result.metrics?.processing_time_seconds || '--') + 's';
+            document.getElementById('tokenCount').textContent = result.metrics?.total_tokens 
+                ? (result.metrics.total_tokens / 1000).toFixed(1) + 'K' 
+                : '--';
+
+            // Summary
+            document.getElementById('summaryText').textContent = d.summary || 'Tidak ada ringkasan.';
+
+            // Parties
+            const partiesHtml = (d.parties || []).map(p => 
+                `<div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
+                    <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                    <span class="font-medium text-slate-700">${p.name || 'Unknown'}</span>
+                    <span class="text-sm text-slate-400">(${p.role || 'Unknown'})</span>
+                </div>`
+            ).join('');
+            document.getElementById('partiesList').innerHTML = partiesHtml || '<p class="text-slate-400 text-sm italic">Not detected</p>';
+
+            // Risk flags
+            const flags = d.risk_flags || [];
+            if (flags.length === 0) {
+                document.getElementById('noFlags').classList.remove('hidden');
+                document.getElementById('riskFlagsList').classList.add('hidden');
+            } else {
+                document.getElementById('noFlags').classList.add('hidden');
+                document.getElementById('riskFlagsList').classList.remove('hidden');
+                const flagsHtml = flags.map(f => {
+                    const riskClass = (f.risk || 'low').toLowerCase() === 'high' ? 'risk-high' : 
+                                     (f.risk || 'low').toLowerCase() === 'medium' ? 'risk-medium' : 'risk-low';
+                    const riskLabel = (f.risk || 'low').toUpperCase();
+                    const riskColor = (f.risk || 'low').toLowerCase() === 'high' ? 'text-red-600 bg-red-50' :
+                                      (f.risk || 'low').toLowerCase() === 'medium' ? 'text-yellow-600 bg-yellow-50' :
+                                      'text-green-600 bg-green-50';
+                    return `<div class="p-3 bg-slate-50 rounded-lg ${riskClass}">
+                        <div class="flex items-start justify-between gap-2">
+                            <p class="text-sm font-medium text-slate-700">${f.clause || 'Unknown clause'}</p>
+                            <span class="px-2 py-0.5 rounded text-xs font-medium ${riskColor} shrink-0">${riskLabel}</span>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-1">${f.reason || ''}</p>
+                    </div>`;
+                }).join('');
+                document.getElementById('riskFlagsList').innerHTML = flagsHtml;
+            }
+
+            // Missing clauses
+            const missing = d.missing_clauses || [];
+            if (missing.length === 0) {
+                document.getElementById('noMissing').classList.remove('hidden');
+            } else {
+                document.getElementById('noMissing').classList.add('hidden');
+                const missingHtml = missing.map(m => 
+                    `<div class="flex items-start gap-2 p-2 bg-red-50 rounded-lg">
+                        <span class="text-red-500 mt-0.5">✕</span>
+                        <span class="text-sm text-slate-700">${m}</span>
+                    </div>`
+                ).join('');
+                document.getElementById('missingClausesList').innerHTML = missingHtml;
+            }
+
+            // Recommendations
+            const recs = d.recommendations || [];
+            const recsHtml = recs.map(r => 
+                `<li class="flex items-start gap-2 text-sm text-slate-700">
+                    <span class="text-blue-500 mt-0.5">→</span>
+                    <span>${r}</span>
+                </li>`
+            ).join('');
+            document.getElementById('recommendationsList').innerHTML = recsHtml || '<li class="text-slate-400 text-sm italic">No recommendations.</li>';
+
+            // Strengths
+            const strengths = d.strengths || [];
+            const strengthsHtml = strengths.map(s => 
+                `<li class="flex items-start gap-2 text-sm text-slate-700">
+                    <span class="text-green-500 mt-0.5">✓</span>
+                    <span>${s}</span>
+                </li>`
+            ).join('');
+            document.getElementById('strengthsList').innerHTML = strengthsHtml;
+            if (strengths.length === 0) document.getElementById('noStrengths').classList.remove('hidden');
+
+            // Legal info
+            document.getElementById('governingLaw').textContent = d.governing_law || 'Not specified';
+            document.getElementById('disputeResolution').textContent = d.dispute_resolution || 'Not specified';
+
+            // Show results with staggered animation
+            document.getElementById('resultsSection').classList.remove('hidden');
+            document.querySelectorAll('.result-card').forEach((el, i) => {
+                setTimeout(() => el.classList.add('show'), i * 100);
+            });
+
+            // Scroll to results
+            document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // ===== DOWNLOAD REPORT =====
+        function downloadReport() {
+            if (!lastAnalysisData) return;
+            const d = lastAnalysisData.data;
+            const report = `AI CONTRACT ANALYSIS REPORT
+============================
+File: ${lastAnalysisData.filename}
+Date: ${new Date().toLocaleString('id-ID')}
+
+RISK SCORE: ${d.risk_score}/100 (${(d.risk_level || 'N/A').toUpperCase()})
+Document Type: ${d.doc_type || 'N/A'}
+Processing Time: ${(lastAnalysisData.metrics?.processing_time_seconds || 'N/A')}s
+
+SUMMARY:
+${d.summary || 'N/A'}
+
+PARTIES:
+${(d.parties || []).map(p => `  - ${p.name} (${p.role})`).join('\n') || '  N/A'}
+
+RISK FLAGS:
+${(d.risk_flags || []).map(f => `  [${(f.risk || 'N/A').toUpperCase()}] ${f.clause || ''}\n    ${f.reason || ''}`).join('\n') || '  None detected'}
+
+MISSING CLAUSES:
+${(d.missing_clauses || []).map(m => `  - ${m}`).join('\n') || '  None'}
+
+RECOMMENDATIONS:
+${(d.recommendations || []).map(r => `  - ${r}`).join('\n') || '  None'}
+
+Governing Law: ${d.governing_law || 'Not specified'}
+Dispute Resolution: ${d.dispute_resolution || 'Not specified'}
+
+---
+Generated by AI Contract Copilot | This is not legal advice.
+`;
+
+            const blob = new Blob([report], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `contract-analysis-${Date.now()}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ===== GENERATE DRAFT =====
+        async function generateDraft(event) {
+            event.preventDefault();
+
+            const formData = new FormData();
+            formData.append('doc_type', document.getElementById('docType').value);
+            formData.append('party1_name', document.getElementById('party1Name').value);
+            formData.append('party1_role', document.getElementById('party1Role').value);
+            formData.append('party2_name', document.getElementById('party2Name').value);
+            formData.append('party2_role', document.getElementById('party2Role').value);
+            formData.append('context', document.getElementById('context').value);
+            formData.append('language', currentLang);
+
+            document.getElementById('draftLoading').classList.remove('hidden');
+            document.getElementById('draftResult').classList.add('hidden');
+
+            try {
+                const res = await fetch('/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await res.json();
+
+                document.getElementById('draftLoading').classList.add('hidden');
+
+                if (result.success) {
+                    const draftText = result.data?.draft_text || 'Failed to generate draft.';
+                    document.getElementById('draftContent').textContent = draftText;
+                    document.getElementById('draftResult').classList.remove('hidden');
+                    window.lastDraft = draftText;
+                } else {
+                    alert('Error: ' + (result.error || result.detail || 'Unknown error'));
+                }
+            } catch (err) {
+                document.getElementById('draftLoading').classList.add('hidden');
+                alert('Failed to connect to server.');
+            }
+        }
+
+        function copyDraft() {
+            const text = document.getElementById('draftContent').textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Draft copied to clipboard!');
+            }).catch(() => {
+                // Fallback
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+                alert('Draft copied to clipboard!');
+            });
+        }
+
+        function downloadDraft() {
+            const text = document.getElementById('draftContent').textContent;
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `draft-${document.getElementById('docType').value || 'contract'}-${Date.now()}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ===== HISTORY =====
+        async function loadHistory() {
+            try {
+                const res = await fetch('/history');
+                const data = await res.json();
+
+                let html = '';
+                if (data.analyses && data.analyses.length > 0) {
+                    html += '<h3 class="text-lg font-semibold text-slate-800 mb-4">📊 Recent Analysis</h3>';
+                    html += '<div class="space-y-3 mb-8">';
+                    data.analyses.forEach(a => {
+                        const scoreColor = a.risk_score !== null 
+                            ? (a.risk_score < 30 ? 'text-green-600' : a.risk_score < 60 ? 'text-yellow-600' : 'text-red-600')
+                            : 'text-slate-400';
+                        html += `<div class="p-4 bg-white rounded-xl border border-slate-200 flex items-center justify-between">
+                            <div>
+                                <p class="font-medium text-slate-800">${a.filename || 'Unknown'}</p>
+                                <p class="text-xs text-slate-500">${a.doc_type || '?'} • ${a.created_at ? new Date(a.created_at).toLocaleString('id-ID') : '?'}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-lg font-bold ${scoreColor}">${a.risk_score !== null ? a.risk_score : '--'}</p>
+                                <p class="text-xs text-slate-400">${a.status}</p>
+                            </div>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+
+                if (data.drafts && data.drafts.length > 0) {
+                    html += '<h3 class="text-lg font-semibold text-slate-800 mb-4">📝 Recent Drafts</h3>';
+                    html += '<div class="space-y-3">';
+                    data.drafts.forEach(d => {
+                        html += `<div class="p-4 bg-white rounded-xl border border-slate-200">
+                            <p class="font-medium text-slate-800">${d.doc_type || 'Unknown'}</p>
+                            <p class="text-xs text-slate-500">${d.prompt || ''} • ${d.created_at ? new Date(d.created_at).toLocaleString('id-ID') : '?'}</p>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+
+                if (!html) {
+                    html = '<div class="text-center py-12 text-slate-400"><p class="text-lg" data-i18n="historyEmpty">No history yet.</p><p class="text-sm mt-1" data-i18n="historyEmptySub">Upload a contract to get started.</p></div>';
+                }
+
+                document.getElementById('historyContent').innerHTML = html;
+            } catch (err) {
+                document.getElementById('historyContent').innerHTML = 
+                    '<div class="text-center py-12 text-slate-400"><p>Failed to load history. Make sure the server is running.</p></div>';
+            }
+        }
+
+        // ===== INIT =====
+        // Load history on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            applyLanguage();
+            loadHistory();
+        });
+    </script>
+
+</body>
+</html>

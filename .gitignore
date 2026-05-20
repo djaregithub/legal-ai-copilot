@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.env
+*.db
+sample_*.docx
+sample_*.md
+create_*.py
+.DS_Store
+*.db
+vendor/\n.env
